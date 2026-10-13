@@ -939,15 +939,7 @@ impl ThreadManager {
 
     /// Lists running threads that clients can access.
     pub async fn list_thread_ids(&self) -> Vec<ThreadId> {
-        self.state
-            .threads
-            .read()
-            .await
-            .iter()
-            .filter_map(|(thread_id, thread)| {
-                (!thread.session_source.is_internal() && thread.is_running()).then_some(*thread_id)
-            })
-            .collect()
+        self.state.list_thread_ids().await
     }
 
     pub fn subscribe_thread_created(&self) -> broadcast::Receiver<ThreadId> {
@@ -1726,7 +1718,7 @@ impl ThreadManagerState {
             .await
             .iter()
             .filter_map(|(thread_id, thread)| {
-                (!thread.session_source.is_internal()).then_some(*thread_id)
+                (!thread.session_source.is_internal() && thread.is_running()).then_some(*thread_id)
             })
             .collect()
     }

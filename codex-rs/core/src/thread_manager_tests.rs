@@ -2379,13 +2379,17 @@ async fn resume_active_thread_from_rollout_returns_running_thread() {
         .expect("shutdown source thread");
 }
 
-#[rstest::rstest]
-#[case(ThreadHistoryMode::Legacy)]
-#[case(ThreadHistoryMode::Paginated)]
 #[tokio::test]
-async fn resume_stopped_thread_from_rollout_spawns_new_thread(
-    #[case] history_mode: ThreadHistoryMode,
-) {
+async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
+    assert_stopped_thread_resumes(ThreadHistoryMode::Legacy).await;
+}
+
+#[tokio::test]
+async fn resume_stopped_paginated_thread_from_rollout_spawns_new_thread() {
+    assert_stopped_thread_resumes(ThreadHistoryMode::Paginated).await;
+}
+
+async fn assert_stopped_thread_resumes(history_mode: ThreadHistoryMode) {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
     config.codex_home = temp_dir.path().join("codex-home").abs();

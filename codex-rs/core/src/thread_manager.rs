@@ -937,6 +937,7 @@ impl ThreadManager {
         self.state.models_manager.list_collaboration_modes()
     }
 
+    /// Lists running threads that clients can access.
     pub async fn list_thread_ids(&self) -> Vec<ThreadId> {
         self.state.list_thread_ids().await
     }
@@ -945,8 +946,14 @@ impl ThreadManager {
         self.state.thread_created_tx.subscribe()
     }
 
+    /// Fetches a running thread that clients can access.
     pub async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
-        self.state.get_thread(thread_id).await
+        let thread = self.state.get_thread(thread_id).await?;
+        if thread.is_running() {
+            Ok(thread)
+        } else {
+            Err(CodexErr::ThreadNotFound(thread_id))
+        }
     }
 
     /// Board hosts may reach internal runtimes only through a matching explicit connection.
@@ -1711,7 +1718,7 @@ impl ThreadManagerState {
             .await
             .iter()
             .filter_map(|(thread_id, thread)| {
-                (!thread.session_source.is_internal()).then_some(*thread_id)
+                (!thread.session_source.is_internal() && thread.is_running()).then_some(*thread_id)
             })
             .collect()
     }

@@ -2379,8 +2379,13 @@ async fn resume_active_thread_from_rollout_returns_running_thread() {
         .expect("shutdown source thread");
 }
 
+#[rstest::rstest]
+#[case(ThreadHistoryMode::Legacy)]
+#[case(ThreadHistoryMode::Paginated)]
 #[tokio::test]
-async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
+async fn resume_stopped_thread_from_rollout_spawns_new_thread(
+    #[case] history_mode: ThreadHistoryMode,
+) {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
     config.codex_home = temp_dir.path().join("codex-home").abs();
@@ -2409,7 +2414,7 @@ async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
 
     let source = manager
         .start_thread(StartThreadOptions {
-            history_mode: Some(ThreadHistoryMode::Legacy),
+            history_mode: Some(history_mode),
             ..StartThreadOptions::new(config.clone())
         })
         .await
@@ -2430,10 +2435,38 @@ async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
         .await
         .expect("shutdown source thread");
 
+    // The lifecycle owner can still inspect the stopped runtime, but client requests must
+    // resume from durable history instead of rejoining its closed submission channel.
+    assert!(Arc::ptr_eq(
+        &manager
+            .state
+            .get_thread(source.thread_id)
+            .await
+            .expect("retained source runtime"),
+        &source.thread,
+    ));
+    assert!(manager.get_thread(source.thread_id).await.is_err());
+    assert!(manager.list_thread_ids().await.is_empty());
+
+    let history = manager
+        .state
+        .thread_store
+        .load_latest_model_context(LoadThreadHistoryParams {
+            thread_id: source.thread_id,
+            include_archived: false,
+        })
+        .await
+        .expect("load stopped thread history");
+
     let resumed = manager
-        .resume_legacy_thread_from_rollout(
+        .resume_thread_with_history(
             config,
-            rollout_path,
+            InitialHistory::Resumed(ResumedHistory {
+                history_revision: history.revision,
+                conversation_id: source.thread_id,
+                history: Arc::new(history.items),
+                rollout_path: Some(rollout_path),
+            }),
             auth_manager,
             /*parent_trace*/ None,
             ClientMcpExtensions::default(),
@@ -2442,6 +2475,14 @@ async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
         .expect("resume stopped source thread");
     assert_eq!(resumed.thread_id, source.thread_id);
     assert!(!Arc::ptr_eq(&resumed.thread, &source.thread));
+    assert!(Arc::ptr_eq(
+        &manager
+            .get_thread(source.thread_id)
+            .await
+            .expect("running replacement runtime"),
+        &resumed.thread,
+    ));
+    assert_eq!(manager.list_thread_ids().await, vec![source.thread_id]);
 
     resumed
         .thread
